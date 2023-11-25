@@ -208,32 +208,40 @@ void main ( void ) {
          // don't strictly have to show it, but I want to
 
     updateProbe( ivec2( U ) );
-    out_color = vec4( readPixel( ivec2( U.xy ) ), 1.0f );
+    out_color = vec4( vec3( 1.0f ) - readPixel( ivec2( U.xy ) ), 1.0f );
 
   } else {
 
     vec3 color = vec3( 0.0f );
     vec3 prevColor = texelFetch( texPreviousFrame, ivec2( U.xy ), 0 ).xyz;
-    for ( int x = 0; x < 2; x++ )
-    for ( int y = 0; y < 1; y++ ) {
+    int xIters = 2;
+    int yIters = 2;
+    for ( int x = 0; x < xIters; x++ )
+    for ( int y = 0; y < yIters; y++ ) {
+      
+      vec2 screenPos = ( U.xy + hash_s( x + y + x * y ) ) / textureSize( texPreviousFrame, 0 ).xy - vec2( 0.5f );
+      
+      // lens distort, broekn
+      // screenPos = screenPos * ( 100.1f * pow( length( screenPos ), 2.0f ) + 1.0f * pow( length( screenPos ), 4.0f ) );
 
       float t = float( fGlobalTime ) * 0.25f;
       vec2 uv = rot( 0.5f + 0.1f * sin( T * 0.2f ) ) *
-        ( U.xy + hash_s( x + y + x * y ) ) * ( 0.5f + 0.1f * sin( t ) ) +
+        ( screenPos ) * ( 500.0f + 50.0f * sin( t ) ) +
         ivec2( int( 1000 + 50 * T ) ) + 
         ivec2( sin( t * hash_s( 619 ) ) * 300 * hash_s( 69 ),
                cos( t * hash_s( 29745 ) ) * 500 * hash_s( 420 ) );
       ivec2 bin = ivec2( floor( uv / vec2( 8.0f, 16.0f ) ) );
       ivec2 offset = ivec2( uv ) % ivec2( 8, 16 );
       float glyphValNoMod = ( hash_s( bin.x * bin.y ) + t ) / 1.0f;
-      float glyphVal = mod( glyphValNoMod, hash_s( bin.x * bin.y + 500 + 100 ) );
+      float glyphVal = mod( glyphValNoMod, hash_s( bin.x * bin.y + 600 ) );
       uint pick = uint( hashi( bin.x + bin.y * 102026 ) ) % 255u;
       int onGlyph = fontRef( ( pick + int( glyphValNoMod ) ) % 255u, offset );
       color += ( onGlyph == 0 ? vec3( 0.0f ) : palette( sin( glyphVal.x + cos( T / 50.0f ) ) ) );
 
     }
 
-    color = mix( prevColor, color / 4.0f, 0.375f );
+    color = mix( prevColor, color / float( xIters * yIters * 1.3f ), 0.375f );
+    // color = color / float( xIters * yIters * 1.3f );
     out_color = vec4( color, 1.0f );
 
   }
