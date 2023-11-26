@@ -26,7 +26,6 @@ layout( location = 0 ) out vec4 out_color; // out_color must be written in order
 #define pi acos( -1.0f )
 #define tau ( acos( -1.0f ) * 2.0f )
 
-
 #define rot(a) mat2(cos(a),-sin(a),sin(a),cos(a))
 
 // referencing a pixel, for an extended ASCII character in Code Page 37
@@ -129,6 +128,7 @@ int fontRef ( uint char, ivec2 offset ) {
     return fontRef( char, offset, bvec2( false, true ) );
 }
 
+
 // hashes
 uint seed = 12512;
 uint hashi ( uint x ) {
@@ -149,12 +149,12 @@ vec2 sampleDisk () {
     return vec2( sin( r.x * tau ), cos( r.x * tau ) ) * sqrt( r.y );
 }
 
-void storePixel ( ivec2 p, vec3 col ) {
+void storePixel ( ivec2 p, vec3 color ) {
   // colour quantized to integer.
-  ivec3 quantized = ivec3( col * 10000 );
-  imageStore( computeTex[ 0 ], p, ivec4( quantized.x ) ); 
-  imageStore( computeTex[ 1 ], p, ivec4( quantized.y ) ); 
-  imageStore( computeTex[ 2 ], p, ivec4( quantized.z ) ); 
+  ivec3 quantized = ivec3( color * 10000 );
+  imageStore( computeTex[ 0 ], p, ivec4( quantized.x ) );
+  imageStore( computeTex[ 1 ], p, ivec4( quantized.y ) );
+  imageStore( computeTex[ 2 ], p, ivec4( quantized.z ) );
 }
 
 void addToPixel ( ivec2 p, vec3 color ) {
@@ -181,9 +181,138 @@ vec3 palette ( float i ) {
   );
 }
 
+// support funcs for line drawing
+float RemapRange ( in float value, in float iMin, in float iMax, in float oMin, in float oMax ) {
+	return ( oMin + ( ( oMax - oMin ) / ( iMax - iMin ) ) * ( value - iMin ) );
+}
+
+void swap ( inout int a, inout int b ) {
+  int temp;
+  temp = a;
+  a = b;
+  b = temp;
+}
+
+void swap ( inout float a, inout float b ) {
+  float temp;
+  temp = a;
+  a = b;
+  b = temp;
+}
+
+// draw line
+void drawLine ( vec3 p0, vec3 p1, vec3 color ) {
+  vec2 dims = textureSize( texPreviousFrame, 0 ).xy;
+  float scale = dims.x / dims.y;
+  p0.y *= scale;
+  p1.y *= scale;
+	int x0 = int( RemapRange( p0.x, -1.0f, 1.0f, 0.0f, float( dims.x ) - 1.0f ) );
+	int y0 = int( RemapRange( p0.y, -1.0f, 1.0f, 0.0f, float( dims.y ) - 1.0f ) );
+	int x1 = int( RemapRange( p1.x, -1.0f, 1.0f, 0.0f, float( dims.x ) - 1.0f ) );
+	int y1 = int( RemapRange( p1.y, -1.0f, 1.0f, 0.0f, float( dims.y ) - 1.0f ) );
+	float z0 = p0.z; float z1 = p1.z;	bool steep = false;
+	if ( abs( x0 - x1 ) < abs( y0 - y1 ) ) {
+		swap( x0, y0 ); swap( x1, y1 ); steep = true;
+	}
+	if ( x0 > x1 ) {
+		swap( x0, x1 );	swap( y0, y1 ); swap( z0, z1 );
+	}
+	int dx = x1 - x0;	int dy = y1 - y0;
+	int derror2 = abs( dy ) * 2;
+	int error2 = 0;
+	int y = y0;
+	for ( int x = x0; x <= x1; x++ ) {
+		// interpolated depth value
+		float depth = RemapRange( float( x ), float( x0 ), float( x1 ), z0, z1 );
+    int yTemp = y;
+    int xTemp = x;
+		if ( steep ) {
+      swap( y, x );
+		}
+    float depthSample = uintBitsToFloat( imageLoad( computeTexBack[ 2 ], ivec2( x, y ) ).r );
+		if ( depth < depthSample ) {
+        /* write color, write depth , to x, y */
+      // storePixel( ivec2( x, y ), color.xyz );
+      addToPixel( ivec2( x, y ), color.xyz );
+		}
+    y = yTemp;
+    x = xTemp;
+		error2 += derror2;
+		if ( error2 > dx ) {
+			y += ( y1 > y0 ? 1 : -1 );
+			error2 -= dx * 2;
+		}
+	}
+}
+
+// the distance function
+void pR(inout vec2 p, float a) {
+	p = cos(a)*p + sin(a)*vec2(p.y, -p.x);
+}
+float de ( vec3 p ) {
+  /*
+  // pR( p.yz, -1.2f );
+  pR( p.zy, -1.9f );
+  pR( p.xy, 1.25f );
+  p.y -= 0.56f;
+  p *= 12.0f;
+  const int iterations = 15;
+  float d = -2.; // vary this parameter, range is like -20 to 20
+  p=p.yxz;
+  pR( p.yz, 1.570795f );
+  p.x += 6.5f;
+  // p.yz = mod(abs(p.yz)-.0, 20.) - 10.;
+  float scale = 1.25f;
+  p.xy /= ( 1.0f + d * d * 0.0005f );
+  float l = 0.;
+  for (int i=0; i < iterations; i++) {
+    p.xy = abs(p.xy);
+    p = p*scale + vec3(-3. + d*0.0095,-1.5,-.5);
+    pR(p.xy,0.35-d*0.015);
+    pR(p.yz,0.5+d*0.02);
+    vec3 p6 = p*p*p; p6=p6*p6;
+    l =pow(p6.x + p6.y + p6.z, 1./6.);
+  }
+  return ( l*pow(scale, -float(iterations))-.15 ) / 35.0f;
+  */
+  return distance( vec3( 0.0f ), p ) - 0.3f + 0.1f * sin( T );
+}
+
+#define epsilon 0.001f
+#define maxDist 2.0f
+#define maxStep 150
+float rayMarch ( in vec3 O, in vec3 D ) {
+  vec3 p = O;
+  float d = 0.0f;
+  float dTotal = 0.0f;
+  float dMin = 1000.0f;
+  for ( int step = 0; step < maxStep; step++ ) {
+    dMin = min( d = de( p ), dMin );
+    dTotal += d;
+    p += d * D;
+    if ( dMin <= epsilon || dTotal > maxDist ) {
+      dTotal = min( dTotal, maxDist );
+      break;
+    }
+  }
+  return dTotal;
+}
+
+vec3 sphericalFibonacci ( float i, float num ) {
+    float phi = tau * i * ( 2.0f / ( 3.0f - sqrt( 5.0f ) ) );
+    float theta = acos( 1.0f - 2.0f * i / num);
+    return vec3( sin( theta ) * cos( phi ), sin( theta ) * sin( phi ), cos( theta ) );
+}
+
 void updateProbe ( ivec2 lightIndex ) {
-   // update distance samples for the probes, write the lines, checking the depth buffer per texel
-  storePixel( lightIndex, vec3( palette( mod( hash_s( U.x * U.y * 100 ) * 0.2f + hash_s( U.x + U.y * U.x * 200 ) * T, 2.8f ) ) ) );
+  // color cycling test pattern
+  // storePixel( lightIndex, vec3( palette( mod( hash_s( U.x * U.y * 100 ) * 0.2f + hash_s( U.x + U.y * U.x * 200 ) * T, 2.8f ) ) ) );
+
+  // update the distance sample for this pixel
+  
+  // draw the line associated with this pixel
+    // check the depth buffer, to determine
+
 }
 
 
@@ -199,28 +328,36 @@ void main ( void ) {
     U.y > ( textureSize( texPreviousFrame, 0 ).y - 64 )
   );
 
-  if ( boundsChecks.x && boundsChecks.y || 
-       boundsChecks.z && boundsChecks.w ||
-       boundsChecks.x && boundsChecks.w || 
-       boundsChecks.z && boundsChecks.y ) {
+  vec3 color = vec3( 0.0f );
+  float distSum = 0.0f;
+  vec3 prevColor = texelFetch( texPreviousFrame, ivec2( U.xy ), 0 ).xyz;
+  vec2 txSize = textureSize( texPreviousFrame, 0 ).xy;
+  int xIters = 2;
+  int yIters = 2;
+  for ( int x = 0; x < xIters; x++ )
+  for ( int y = 0; y < yIters; y++ ) {
 
-    // logic is slightly more complex, but I prefer it visually - put the data into the corners
-         // don't strictly have to show it, but I want to
+    vec2 subPxLoc = 2.0f * ( ( U.xy + hash_s( x + y + x * y ) ) / txSize - vec2( 0.5f ) );
+    subPxLoc.y *= ( txSize.y / txSize.x );
 
-    updateProbe( ivec2( U ) );
-    out_color = vec4( vec3( 1.0f ) - readPixel( ivec2( U.xy ) ), 1.0f );
+    vec3 rayOrigin = vec3( subPxLoc, -1.0f );
+    vec3 rayDirection = vec3( 0.0f, 0.0f, 1.0f );
 
-  } else {
+    float d = rayMarch( rayOrigin, rayDirection );
+    distSum += min( d, 2.0f );
 
-    vec3 color = vec3( 0.0f );
-    vec3 prevColor = texelFetch( texPreviousFrame, ivec2( U.xy ), 0 ).xyz;
-    int xIters = 2;
-    int yIters = 2;
-    for ( int x = 0; x < xIters; x++ )
-    for ( int y = 0; y < yIters; y++ ) {
-      
+  }
+
+  float dist = distSum / ( xIters * yIters );
+  uint depthToWrite = floatBitsToUint( dist );
+  imageStore( computeTex[ 2 ], ivec2( U.xy ), uvec4( depthToWrite ) );
+  
+  color = vec3( dist );
+  color.rg += readPixel( ivec2( U.xy ) ).rg;
+  
+      /*// this is the code for the screenspace roving text
       vec2 screenPos = ( U.xy + hash_s( x + y + x * y ) ) / textureSize( texPreviousFrame, 0 ).xy - vec2( 0.5f );
-      
+
       // lens distort, broekn
       // screenPos = screenPos * ( 100.1f * pow( length( screenPos ), 2.0f ) + 1.0f * pow( length( screenPos ), 4.0f ) );
 
@@ -237,12 +374,31 @@ void main ( void ) {
       uint pick = uint( hashi( bin.x + bin.y * 102026 ) ) % 255u;
       int onGlyph = fontRef( ( pick + int( glyphValNoMod ) ) % 255u, offset );
       color += ( onGlyph == 0 ? vec3( 0.0f ) : palette( sin( glyphVal.x + cos( T / 50.0f ) ) ) );
+      */
 
-    }
+  color = mix( prevColor, color / float( xIters * yIters * 1.3f ), 1.0f );
 
-    color = mix( prevColor, color / float( xIters * yIters * 1.3f ), 0.375f );
-    // color = color / float( xIters * yIters * 1.3f );
-    out_color = vec4( color, 1.0f );
+  if ( boundsChecks.x && boundsChecks.y ||
+       boundsChecks.z && boundsChecks.w ||
+       boundsChecks.x && boundsChecks.w ||
+       boundsChecks.z && boundsChecks.y ) {
+    updateProbe( ivec2( U ) );
 
-  }
+         vec3 direction = normalize( sphericalFibonacci( U.x + U.y * 96, 96 * 64 ) );
+         // direction.zy = rot( 0.5f * T ) * direction.zy;
+         // vec3 direction = normalize( sphericalFibonacci( U.x, 96 ) );
+         vec3 origin = vec3( -0.5f * cos( T * 0.33f ), 0.5f * sin( T ), sin( T / 3.0f ) );
+         float d = max( rayMarch( origin, direction ), 0.0 );
+         
+         
+         vec3 c = vec3( palette( mod( hash_s( U.x * U.y * 100 ) * 0.2f + hash_s( U.x + U.y * U.x * 200 ) * T / 10.0f, 2.8f ) ) );
+         // c = vec3( 0.1f * d, 0.1f * d, 0.0f );
+         drawLine( origin, origin + d * direction, c );
+
+    // update color, if you want to see internal state, this is just a dumb color cycling test pattern
+    // color.rgb = vec3( palette( mod( hash_s( U.x * U.y * 100 ) * 0.2f + hash_s( U.x + U.y * U.x * 200 ) * T, 2.8f ) ) );
+    color.rgb = vec3( d / 5.0f, 0.0f, 0.0f );
+ }
+
+  out_color = vec4( color, 1.0f );
 }
